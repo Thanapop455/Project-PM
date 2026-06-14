@@ -1,0 +1,212 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  STAFF
+}
+
+enum DeviceStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PMPlanStatus {
+  PENDING
+  DONE
+  CANCELLED
+}
+
+enum PMPolicyTarget {
+  GROUP
+  TYPE
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  username     String   @unique @db.VarChar(50)
+  passwordHash String   @db.VarChar(255)
+  fullName     String   @db.VarChar(100)
+  role         UserRole @default(STAFF)
+  isActive     Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pmRecords PMRecord[]
+
+  @@map("users")
+}
+
+model DeviceGroup {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(50)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  types      DeviceType[]
+  pmPolicies PMPolicy[]
+
+  @@map("device_groups")
+}
+
+model DeviceType {
+  id      Int    @id @default(autoincrement())
+  groupId Int
+  name    String @db.VarChar(50)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  group      DeviceGroup @relation(fields: [groupId], references: [id])
+  devices    Device[]
+  pmPolicies PMPolicy[]
+
+  @@unique([groupId, name])
+  @@index([groupId])
+  @@map("device_types")
+}
+
+model Brand {
+  id   Int    @id @default(autoincrement())
+  name String @unique @db.VarChar(100)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  models DeviceModel[]
+
+  @@map("brands")
+}
+
+model DeviceModel {
+  id      Int    @id @default(autoincrement())
+  brandId Int
+  name    String @db.VarChar(100)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  brand   Brand    @relation(fields: [brandId], references: [id])
+  devices Device[]
+
+  @@unique([brandId, name])
+  @@index([brandId])
+  @@map("device_models")
+}
+
+model Zone {
+  id   Int     @id @default(autoincrement())
+  code String  @unique @db.VarChar(20)
+  name String? @db.VarChar(100)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  devices Device[]
+
+  @@map("zones")
+}
+
+model Device {
+  id Int @id @default(autoincrement())
+
+  deviceTypeId Int
+  modelId      Int
+  zoneId       Int
+
+  serialNumber String       @unique @db.VarChar(100)
+  deviceName   String       @db.VarChar(150)
+  status       DeviceStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  type  DeviceType  @relation(fields: [deviceTypeId], references: [id])
+  model DeviceModel @relation(fields: [modelId], references: [id])
+  zone  Zone        @relation(fields: [zoneId], references: [id])
+
+  pmPlans   PMPlan[]
+  pmRecords PMRecord[]
+
+  @@index([deviceTypeId])
+  @@index([modelId])
+  @@index([zoneId])
+  @@index([status])
+  @@map("devices")
+}
+
+model PMPolicy {
+  id Int @id @default(autoincrement())
+
+  target PMPolicyTarget
+
+  deviceGroupId Int?
+  deviceTypeId  Int?
+
+  intervalMonths Int
+  defaultCost    Decimal @db.Decimal(10, 2)
+  isActive       Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deviceGroup DeviceGroup? @relation(fields: [deviceGroupId], references: [id])
+  deviceType  DeviceType?  @relation(fields: [deviceTypeId], references: [id])
+
+  @@index([deviceGroupId])
+  @@index([deviceTypeId])
+  @@map("pm_policies")
+}
+
+model PMPlan {
+  id Int @id @default(autoincrement())
+
+  deviceId Int
+  planDate DateTime     @db.Date
+  status   PMPlanStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  device   Device    @relation(fields: [deviceId], references: [id])
+  pmRecord PMRecord?
+
+  @@unique([deviceId, planDate])
+  @@index([deviceId])
+  @@index([planDate])
+  @@index([status])
+  @@map("pm_plans")
+}
+
+model PMRecord {
+  id Int @id @default(autoincrement())
+
+  pmPlanId    Int? @unique
+  deviceId    Int
+  performedBy Int
+
+  pmDate DateTime @db.Date
+
+  cost   Decimal @db.Decimal(10, 2)
+  remark String? @db.VarChar(500)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pmPlan PMPlan? @relation(fields: [pmPlanId], references: [id])
+  device Device  @relation(fields: [deviceId], references: [id])
+  user   User    @relation(fields: [performedBy], references: [id])
+
+  @@index([deviceId])
+  @@index([performedBy])
+  @@index([pmDate])
+  @@map("pm_records")
+}
