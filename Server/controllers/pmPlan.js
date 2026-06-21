@@ -1,4 +1,6 @@
 const pmPlanService = require("../services/pmPlan");
+const notificationService = require("../services/notification");
+const alertLogService = require("../services/alertLog");
 
 exports.list = async (req, res, next) => {
   try {
@@ -17,6 +19,23 @@ exports.generate = async (req, res, next) => {
     next(error);
   }
 };
+exports.undoGenerate = async (req, res, next) => {
+  try {
+    const result = await pmPlanService.undoGenerate(req.body);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.years = async (req, res, next) => {
+  try {
+    const years = await pmPlanService.getAvailableYears();
+    res.json(years);
+  } catch (error) {
+    next(error);
+  }
+};
 
 exports.alerts = async (req, res, next) => {
   try {
@@ -27,10 +46,32 @@ exports.alerts = async (req, res, next) => {
   }
 };
 
-exports.cancel = async (req, res, next) => {
+exports.filterOptions = async (req, res, next) => {
   try {
-    const plan = await pmPlanService.cancel(req.params.id);
-    res.json(plan);
+    const options = await pmPlanService.getFilterOptions();
+    res.json(options);
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.alertStatus = async (req, res, next) => {
+  try {
+    const log = await alertLogService.getAutoAlertLog();
+    res.json({
+      sentToday: ["SENT", "SENT_MANUAL"].includes(log?.status),
+      log,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.sendAlerts = async (req, res, next) => {
+  try {
+    const result = await notificationService.sendPMAlerts();
+    await alertLogService.recordManualAlertResult(result);
+    res.json(result);
   } catch (error) {
     next(error);
   }

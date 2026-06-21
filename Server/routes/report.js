@@ -7,6 +7,8 @@ const staffOnly = require("../middlewares/staffOnly");
 
 router.use(authCheck, staffOnly);
 
+router.get("/devices", reportController.reportDevices);
+
 router.get("/pm-plan", reportController.pmPlanReport);
 router.get("/pm-history", reportController.pmHistoryReport);
 router.get("/pm-cost", reportController.pmCostReport);

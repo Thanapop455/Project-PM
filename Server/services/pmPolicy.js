@@ -1,4 +1,5 @@
-const prisma = require("../config/prismaClient");
+const prisma = require("../config/prisma");
+const { findManyPaginated } = require("../utils/pagination");
 
 const checkPMPolicyData = async (body, updateId = null) => {
   const {
@@ -136,8 +137,36 @@ const checkPMPolicyData = async (body, updateId = null) => {
   return data;
 };
 
-exports.list = async () => {
-  return await prisma.pMPolicy.findMany({
+exports.list = async (query = {}) => {
+  const search = String(query.search || "").trim();
+  const target = search.toUpperCase();
+  const searchFilters = search
+    ? [
+        { deviceGroup: { name: { contains: search } } },
+        { deviceType: { name: { contains: search } } },
+        { deviceType: { group: { name: { contains: search } } } },
+      ]
+    : [];
+
+  if (["GROUP", "TYPE"].includes(target)) {
+    searchFilters.push({ target });
+  }
+
+  if (search !== "" && Number.isFinite(Number(search))) {
+    searchFilters.push(
+      { intervalMonths: Number(search) },
+      { defaultCost: Number(search) }
+    );
+  }
+
+  if (["ACTIVE", "TRUE"].includes(target)) {
+    searchFilters.push({ isActive: true });
+  } else if (["INACTIVE", "FALSE"].includes(target)) {
+    searchFilters.push({ isActive: false });
+  }
+
+  return findManyPaginated(prisma.pMPolicy, {
+    where: searchFilters.length ? { OR: searchFilters } : undefined,
     orderBy: { id: "desc" },
     include: {
       deviceGroup: true,
@@ -147,7 +176,7 @@ exports.list = async () => {
         },
       },
     },
-  });
+  }, query);
 };
 
 exports.create = async (body) => {

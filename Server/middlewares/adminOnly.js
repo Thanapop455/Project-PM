@@ -8,3 +8,5 @@ const adminCheck = (req, res, next) => {
 
   next();
 };
+
+module.exports = adminCheck;

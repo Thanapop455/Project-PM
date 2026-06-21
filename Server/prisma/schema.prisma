@@ -52,7 +52,7 @@ model DeviceGroup {
   updatedAt DateTime @updatedAt
 
   types      DeviceType[]
-  pmPolicies PMPolicy[]
+  pmPolicies PMPolicy?
 
   @@map("device_groups")
 }
@@ -67,7 +67,7 @@ model DeviceType {
 
   group      DeviceGroup @relation(fields: [groupId], references: [id])
   devices    Device[]
-  pmPolicies PMPolicy[]
+  pmPolicies PMPolicy?
 
   @@unique([groupId, name])
   @@index([groupId])
@@ -124,6 +124,7 @@ model Device {
 
   serialNumber String       @unique @db.VarChar(100)
   deviceName   String       @db.VarChar(150)
+  pmStartDate  DateTime?    @db.Date
   status       DeviceStatus @default(ACTIVE)
 
   createdAt DateTime @default(now())
@@ -148,8 +149,8 @@ model PMPolicy {
 
   target PMPolicyTarget
 
-  deviceGroupId Int?
-  deviceTypeId  Int?
+  deviceGroupId Int? @unique
+  deviceTypeId  Int? @unique
 
   intervalMonths Int
   defaultCost    Decimal @db.Decimal(10, 2)
@@ -209,4 +210,34 @@ model PMRecord {
   @@index([performedBy])
   @@index([pmDate])
   @@map("pm_records")
+}
+
+model AlertLog {
+  id Int @id @default(autoincrement())
+
+  alertDate DateTime @db.Date
+  type      String   @db.VarChar(50)
+  status    String   @db.VarChar(30)
+
+  message      String? @db.VarChar(500)
+  channelsJson String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([alertDate, type])
+  @@index([alertDate])
+  @@map("alert_logs")
+}
+
+model PlanGenerationLog {
+  id Int @id @default(autoincrement())
+
+  generatedYear Int @unique
+  createdCount  Int @default(0)
+  restoredCount Int @default(0)
+  skippedCount  Int @default(0)
+  generatedAt   DateTime @default(now())
+
+  @@map("plan_generation_logs")
 }

@@ -28,6 +28,7 @@ const authCheck = async (req, res, next) => {
     req.user = {
       id: user.id,
       username: user.username,
+      fullName: user.fullName,
       role: user.role,
     };
 
@@ -39,24 +40,5 @@ const authCheck = async (req, res, next) => {
   }
 };
 
-const adminCheck = (req, res, next) => {
-  if (req.user.role !== "ADMIN") {
-    return res.status(403).json({
-      message: "Admin only",
-    });
-  }
-
-  next();
-};
-
-const staffCheck = (req, res, next) => {
-  if (!["ADMIN", "STAFF"].includes(req.user.role)) {
-    return res.status(403).json({
-      message: "Staff only",
-    });
-  }
-
-  next();
-};
 
 module.exports = authCheck;

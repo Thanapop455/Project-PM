@@ -8,7 +8,6 @@ const adminOnly = require("../middlewares/adminOnly");
 router.use(authCheck, adminOnly);
 
 router.get("/", deviceController.list);
-router.get("/:id", deviceController.getById);
 router.post("/", deviceController.create);
 router.put("/:id", deviceController.update);
 router.delete("/:id", deviceController.remove);

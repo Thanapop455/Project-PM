@@ -1,10 +1,20 @@
-const prisma = require("../config/prismaClient");
+const prisma = require("../config/prisma");
+const { findManyPaginated } = require("../utils/pagination");
 
 exports.list = async (req, res, next) => {
   try {
-    const zones = await prisma.zone.findMany({
+    const search = String(req.query.search || "").trim();
+    const zones = await findManyPaginated(prisma.zone, {
+      where: search
+        ? {
+            OR: [
+              { code: { contains: search } },
+              { name: { contains: search } },
+            ],
+          }
+        : undefined,
       orderBy: { id: "desc" },
-    });
+    }, req.query);
 
     res.json(zones);
   } catch (error) {

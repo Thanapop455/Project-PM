@@ -43,6 +43,15 @@ exports.pmCostReport = async (req, res, next) => {
   }
 };
 
+exports.reportDevices = async (req, res, next) => {
+  try {
+    const devices = await reportService.getReportDevices();
+    res.json(devices);
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.exportPMPlanReport = async (req, res, next) => {
   try {
     const workbook = await reportService.createPMPlanExcel(req.query);
@@ -55,7 +64,7 @@ exports.exportPMPlanReport = async (req, res, next) => {
 exports.exportPMHistoryReport = async (req, res, next) => {
   try {
     const workbook = await reportService.createPMHistoryExcel(req.query);
-    await sendExcel(res, workbook, "pm-history-report.xlsx");
+    await sendExcel(res, workbook, "pm-log-report.xlsx");
   } catch (error) {
     next(error);
   }

@@ -62,24 +62,3 @@ exports.login = async (req, res, next) => {
     next(error);
   }
 };
-
-exports.me = async (req, res, next) => {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: {
-        id: true,
-        username: true,
-        fullName: true,
-        role: true,
-        isActive: true,
-      },
-    });
-
-    res.json({
-      user,
-    });
-  } catch (error) {
-    next(error);
-  }
-};

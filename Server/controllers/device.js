@@ -9,15 +9,6 @@ exports.list = async (req, res, next) => {
   }
 };
 
-exports.getById = async (req, res, next) => {
-  try {
-    const device = await deviceService.getById(req.params.id);
-    res.json(device);
-  } catch (error) {
-    next(error);
-  }
-};
-
 exports.create = async (req, res, next) => {
   try {
     const device = await deviceService.create(req.body);

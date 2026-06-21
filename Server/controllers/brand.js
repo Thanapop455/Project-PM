@@ -1,13 +1,16 @@
-const prisma = require("../config/prismaClient");
+const prisma = require("../config/prisma");
+const { findManyPaginated } = require("../utils/pagination");
 
 exports.list = async (req, res, next) => {
   try {
-    const brands = await prisma.brand.findMany({
+    const search = String(req.query.search || "").trim();
+    const brands = await findManyPaginated(prisma.brand, {
+      where: search ? { name: { contains: search } } : undefined,
       orderBy: { id: "desc" },
       include: {
         models: true,
       },
-    });
+    }, req.query);
 
     res.json(brands);
   } catch (error) {

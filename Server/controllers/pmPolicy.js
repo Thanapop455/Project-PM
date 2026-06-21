@@ -2,7 +2,7 @@ const pmPolicyService = require("../services/pmPolicy");
 
 exports.list = async (req, res, next) => {
   try {
-    const policies = await pmPolicyService.list();
+    const policies = await pmPolicyService.list(req.query);
     res.json(policies);
   } catch (error) {
     next(error);

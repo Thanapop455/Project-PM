@@ -1,9 +1,30 @@
 const bcrypt = require("bcryptjs");
-const prisma = require("../config/prismaClient");
+const prisma = require("../config/prisma");
+const { findManyPaginated } = require("../utils/pagination");
 
 exports.list = async (req, res, next) => {
   try {
-    const users = await prisma.user.findMany({
+    const search = String(req.query.search || "").trim();
+    const searchFilters = search
+      ? [
+          { username: { contains: search } },
+          { fullName: { contains: search } },
+        ]
+      : [];
+    const normalizedSearch = search.toUpperCase();
+
+    if (["ADMIN", "STAFF"].includes(normalizedSearch)) {
+      searchFilters.push({ role: normalizedSearch });
+    }
+
+    if (["ACTIVE", "TRUE"].includes(normalizedSearch)) {
+      searchFilters.push({ isActive: true });
+    } else if (["INACTIVE", "FALSE"].includes(normalizedSearch)) {
+      searchFilters.push({ isActive: false });
+    }
+
+    const users = await findManyPaginated(prisma.user, {
+      where: searchFilters.length ? { OR: searchFilters } : undefined,
       orderBy: { id: "desc" },
       select: {
         id: true,
@@ -14,7 +35,7 @@ exports.list = async (req, res, next) => {
         createdAt: true,
         updatedAt: true,
       },
-    });
+    }, req.query);
 
     res.json(users);
   } catch (error) {
@@ -66,6 +87,25 @@ exports.update = async (req, res, next) => {
   try {
     const { id } = req.params;
     const { username, password, fullName, role, isActive } = req.body;
+    const targetUserId = Number(id);
+    const isUpdatingSelf = targetUserId === req.user.id;
+
+    if (isUpdatingSelf && role !== undefined && role !== req.user.role) {
+      return res.status(400).json({
+        message: "You cannot change your own role",
+      });
+    }
+
+    if (
+      isUpdatingSelf &&
+      isActive !== undefined &&
+      isActive !== true &&
+      isActive !== "true"
+    ) {
+      return res.status(400).json({
+        message: "You cannot deactivate yourself",
+      });
+    }
 
     const data = {};
 
@@ -79,7 +119,7 @@ exports.update = async (req, res, next) => {
     }
 
     const user = await prisma.user.update({
-      where: { id: Number(id) },
+      where: { id: targetUserId },
       data,
       select: {
         id: true,

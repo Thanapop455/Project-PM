@@ -1,40 +1,49 @@
 const ExcelJS = require("exceljs");
-const prisma = require("../config/prismaClient");
+const prisma = require("../config/prisma");
+const {
+  DAY_MS,
+  formatDateOnly,
+  getLastDayOfMonth,
+  getTodayDate,
+  getUTCDateRange,
+  normalizeDateOnly,
+} = require("../utils/date");
+const {
+  findManyPaginated,
+  getPagination,
+  mapPaginated,
+} = require("../utils/pagination");
 
-const getDateRange = ({ year, month, startDate, endDate }) => {
-  if (startDate && endDate) {
-    return {
-      gte: new Date(startDate),
-      lte: new Date(endDate),
-    };
-  }
+const monthNames = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
 
-  if (year && month) {
-    return {
-      gte: new Date(Number(year), Number(month) - 1, 1),
-      lt: new Date(Number(year), Number(month), 1),
-    };
-  }
-
-  if (year) {
-    return {
-      gte: new Date(Number(year), 0, 1),
-      lt: new Date(Number(year) + 1, 0, 1),
-    };
-  }
-
-  return undefined;
+const tableBorder = {
+  top: { style: "thin" },
+  left: { style: "thin" },
+  bottom: { style: "thin" },
+  right: { style: "thin" },
 };
+
+const getDateRange = (filters) => getUTCDateRange(filters);
 
 const getDisplayStatus = (plan) => {
   if (plan.status === "DONE") return "DONE";
   if (plan.status === "CANCELLED") return "CANCELLED";
 
-  const today = new Date();
-  const planDate = new Date(plan.planDate);
-
-  today.setHours(0, 0, 0, 0);
-  planDate.setHours(0, 0, 0, 0);
+  const today = getTodayDate();
+  const planDate = normalizeDateOnly(plan.planDate);
 
   if (plan.status === "PENDING") {
     if (planDate.getTime() === today.getTime()) return "DUE TODAY";
@@ -46,25 +55,260 @@ const getDisplayStatus = (plan) => {
 };
 
 const formatDate = (date) => {
-  if (!date) return null;
-
-  const d = new Date(date);
-  return d.toISOString().split("T")[0];
+  return formatDateOnly(date);
 };
 
+const formatExcelDate = (date) => {
+  if (!date) return "";
+
+  const value = String(date);
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (match) {
+    return `${Number(match[3])}/${Number(match[2])}/${match[1]}`;
+  }
+
+  const d = new Date(date);
+
+  if (Number.isNaN(d.getTime())) {
+    return "";
+  }
+
+  return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+};
+
+const formatDayMonthExcelDate = (date) => {
+  if (!date) return "";
+
+  const value = String(date);
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (match) {
+    return `${Number(match[3])}/${Number(match[2])}/${match[1]}`;
+  }
+
+  const d = new Date(date);
+
+  if (Number.isNaN(d.getTime())) {
+    return "";
+  }
+
+  return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+};
+
+const getMonthTitle = (month) => monthNames[Number(month) - 1] || "All year";
+
+const getPMPlanReportTitle = ({ year, month }) => {
+  if (year && month) {
+    return `รายงานการ PM ตามแผนประจำเดือน ${getMonthTitle(month)}-${year}`;
+  }
+
+  if (year) {
+    return `รายงานการ PM ตามแผนประจำปี ${year}`;
+  }
+
+  return "รายงานการ PM ตามแผน";
+};
+
+const getPMCostReportTitle = ({ year, month }) => {
+  if (year && month) {
+    return `รายงานค่าใช้จ่ายในการ PM ประจำเดือน ${getMonthTitle(month)}-${year}`;
+  }
+
+  if (year) {
+    return `รายงานค่าใช้จ่ายในการ PM ประจำปี ${year}`;
+  }
+
+  return "รายงานค่าใช้จ่ายในการ PM";
+};
+
+const getReportRangeText = ({ year, month, startDate, endDate }) => {
+  if (startDate && endDate) {
+    return `${formatDayMonthExcelDate(startDate)} ถึง ${formatDayMonthExcelDate(endDate)}`;
+  }
+
+  if (year && month) {
+    const lastDay = getLastDayOfMonth(year, month);
+    return `1/${Number(month)}/${year} ถึง ${lastDay}/${Number(month)}/${year}`;
+  }
+
+  if (year) {
+    return `1/1/${year} ถึง 31/12/${year}`;
+  }
+
+  return "ทั้งหมด";
+};
+
+const getDeviceReportName = async (deviceId) => {
+  if (!deviceId) {
+    return "ทุกอุปกรณ์";
+  }
+
+  const device = await prisma.device.findUnique({
+    where: {
+      id: Number(deviceId),
+    },
+    select: {
+      deviceName: true,
+    },
+  });
+
+  return device?.deviceName || `Device ID ${deviceId}`;
+};
+
+const getGroupReportName = async (groupId) => {
+  if (!groupId) {
+    return "ทุกกลุ่มอุปกรณ์";
+  }
+
+  const group = await prisma.deviceGroup.findUnique({
+    where: {
+      id: Number(groupId),
+    },
+    select: {
+      name: true,
+    },
+  });
+
+  return group?.name || `Group ID ${groupId}`;
+};
+
+const getZoneReportName = async (zoneId) => {
+  if (!zoneId) {
+    return "ทุกโซน";
+  }
+
+  const zone = await prisma.zone.findUnique({
+    where: {
+      id: Number(zoneId),
+    },
+    select: {
+      code: true,
+      name: true,
+    },
+  });
+
+  if (!zone) {
+    return `Zone ID ${zoneId}`;
+  }
+
+  return zone.name ? `${zone.code} - ${zone.name}` : zone.code;
+};
+
+const getPMPlanStatusReportName = ({ status, statusView }) => {
+  const value = statusView || status;
+
+  const labels = {
+    ACTIVE: "Active plans",
+    ALL: "ทุกสถานะ",
+    PENDING: "PENDING",
+    OVERDUE: "OVERDUE",
+    DUE_TODAY: "DUE TODAY",
+    DONE: "DONE",
+    CANCELLED: "CANCELLED",
+  };
+
+  return labels[value] || "ทุกสถานะ";
+};
+
+const getPMPlanReportSubtitle = async (query) => {
+  const [groupName, zoneName] = await Promise.all([
+    getGroupReportName(query.groupId),
+    getZoneReportName(query.zoneId),
+  ]);
+
+  return `ช่วงวันที่ : ${getReportRangeText(query)} | สถานะ : ${getPMPlanStatusReportName(
+    query
+  )} | กลุ่มอุปกรณ์ : ${groupName} | Zone : ${zoneName}`;
+};
+
+exports.getReportDevices = async () =>
+  prisma.device.findMany({
+    orderBy: {
+      deviceName: "asc",
+    },
+    select: {
+      id: true,
+      serialNumber: true,
+      deviceName: true,
+      type: {
+        select: {
+          name: true,
+          group: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+      model: {
+        select: {
+          name: true,
+          brand: {
+            select: {
+              name: true,
+            },
+          },
+        },
+      },
+      zone: {
+        select: {
+          code: true,
+        },
+      },
+    },
+  });
+
 exports.getPMPlanReport = async (query) => {
-  const { year, month, groupId, typeId, zoneId, status } = query;
+  const { year, month, groupId, typeId, zoneId, status, statusView } = query;
 
   const where = {};
+  const andConditions = [];
 
   const dateRange = getDateRange({ year, month });
 
   if (dateRange) {
-    where.planDate = dateRange;
+    andConditions.push({
+      planDate: dateRange,
+    });
   }
 
-  if (status) {
-    where.status = status;
+  const requestedStatus = statusView || status;
+
+  if (requestedStatus && requestedStatus !== "ALL") {
+    if (requestedStatus === "ACTIVE") {
+      where.status = {
+        not: "CANCELLED",
+      };
+    } else if (requestedStatus === "OVERDUE") {
+      where.status = "PENDING";
+      andConditions.push({
+        planDate: {
+          lt: getTodayDate(),
+        },
+      });
+    } else if (requestedStatus === "DUE_TODAY") {
+      const today = getTodayDate();
+
+      where.status = "PENDING";
+      andConditions.push({
+        planDate: {
+          gte: today,
+          lt: new Date(today.getTime() + DAY_MS),
+        },
+      });
+    } else if (requestedStatus === "PENDING") {
+      const today = getTodayDate();
+
+      where.status = "PENDING";
+      andConditions.push({
+        planDate: {
+          gte: new Date(today.getTime() + DAY_MS),
+        },
+      });
+    } else {
+      where.status = requestedStatus;
+    }
   }
 
   if (groupId || typeId || zoneId) {
@@ -85,7 +329,11 @@ exports.getPMPlanReport = async (query) => {
     }
   }
 
-  const plans = await prisma.pMPlan.findMany({
+  if (andConditions.length > 0) {
+    where.AND = andConditions;
+  }
+
+  const plans = await findManyPaginated(prisma.pMPlan, {
     where,
     orderBy: {
       planDate: "asc",
@@ -108,10 +356,14 @@ exports.getPMPlanReport = async (query) => {
         },
       },
     },
-  });
+  }, query);
 
-  return plans.map((plan, index) => ({
-    no: index + 1,
+  const rowOffset = Array.isArray(plans)
+    ? 0
+    : (plans.pagination.page - 1) * plans.pagination.pageSize;
+
+  return mapPaginated(plans, (plan, index) => ({
+    no: rowOffset + index + 1,
     pmPlanDate: formatDate(plan.planDate),
     actualPMDate: plan.pmRecord ? formatDate(plan.pmRecord.pmDate) : null,
     deviceGroup: plan.device.type.group.name,
@@ -127,12 +379,70 @@ exports.getPMPlanReport = async (query) => {
 };
 
 exports.getPMHistoryReport = async (query) => {
-  const { deviceId, year, month, startDate, endDate } = query;
+  const { deviceId, year, month, startDate, endDate, deviceSearch } = query;
 
   const where = {};
 
   if (deviceId) {
     where.deviceId = Number(deviceId);
+  } else if (deviceSearch) {
+    const searchText = String(deviceSearch).trim();
+
+    if (searchText) {
+      where.device = {
+        OR: [
+          {
+            deviceName: {
+              contains: searchText,
+            },
+          },
+          {
+            serialNumber: {
+              contains: searchText,
+            },
+          },
+          {
+            type: {
+              name: {
+                contains: searchText,
+              },
+            },
+          },
+          {
+            type: {
+              group: {
+                name: {
+                  contains: searchText,
+                },
+              },
+            },
+          },
+          {
+            model: {
+              name: {
+                contains: searchText,
+              },
+            },
+          },
+          {
+            model: {
+              brand: {
+                name: {
+                  contains: searchText,
+                },
+              },
+            },
+          },
+          {
+            zone: {
+              code: {
+                contains: searchText,
+              },
+            },
+          },
+        ],
+      };
+    }
   }
 
   const dateRange = getDateRange({ year, month, startDate, endDate });
@@ -141,7 +451,7 @@ exports.getPMHistoryReport = async (query) => {
     where.pmDate = dateRange;
   }
 
-  const records = await prisma.pMRecord.findMany({
+  const records = await findManyPaginated(prisma.pMRecord, {
     where,
     orderBy: {
       pmDate: "desc",
@@ -171,10 +481,13 @@ exports.getPMHistoryReport = async (query) => {
         },
       },
     },
-  });
+  }, query);
 
-  return records.map((record, index) => ({
-    no: index + 1,
+  const rowOffset = Array.isArray(records)
+    ? 0
+    : (records.pagination.page - 1) * records.pagination.pageSize;
+  const mappedRecords = mapPaginated(records, (record, index) => ({
+    no: rowOffset + index + 1,
     pmDate: formatDate(record.pmDate),
     performedBy: record.user.fullName,
     deviceGroup: record.device.type.group.name,
@@ -187,10 +500,28 @@ exports.getPMHistoryReport = async (query) => {
     cost: Number(record.cost),
     remark: record.remark,
   }));
+
+  if (Array.isArray(mappedRecords)) {
+    return mappedRecords;
+  }
+
+  const totals = await prisma.pMRecord.aggregate({
+    where,
+    _count: { _all: true },
+    _sum: { cost: true },
+  });
+
+  return {
+    ...mappedRecords,
+    summary: {
+      totalRecords: totals._count._all,
+      totalCost: Number(totals._sum.cost || 0),
+    },
+  };
 };
 
 exports.getPMCostReport = async (query) => {
-  const { year, month } = query;
+  const { year, month, groupId } = query;
 
   const where = {};
 
@@ -198,6 +529,14 @@ exports.getPMCostReport = async (query) => {
 
   if (dateRange) {
     where.pmDate = dateRange;
+  }
+
+  if (groupId) {
+    where.device = {
+      type: {
+        groupId: Number(groupId),
+      },
+    };
   }
 
   const records = await prisma.pMRecord.findMany({
@@ -232,95 +571,258 @@ exports.getPMCostReport = async (query) => {
     summary[groupName].totalCost += Number(record.cost);
   }
 
-  return Object.values(summary).map((item, index) => ({
+  const rows = Object.values(summary).map((item, index) => ({
     no: index + 1,
     equipmentGroup: item.equipmentGroup,
     totalPM: item.totalPM,
     totalCost: item.totalCost,
   }));
+  const pagination = getPagination(query);
+
+  if (!pagination) return rows;
+
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / pagination.pageSize));
+  const page = Math.min(pagination.page, totalPages);
+  const start = (page - 1) * pagination.pageSize;
+
+  return {
+    data: rows.slice(start, start + pagination.pageSize),
+    pagination: {
+      page,
+      pageSize: pagination.pageSize,
+      total,
+      totalPages,
+    },
+    summary: getPMCostTotals(rows),
+  };
 };
 
-const createWorkbook = (sheetName, columns, rows) => {
+const getPMCostTotals = (rows) =>
+  rows.reduce(
+    (totals, row) => ({
+      totalPM: totals.totalPM + Number(row.totalPM || 0),
+      totalCost: totals.totalCost + Number(row.totalCost || 0),
+    }),
+    {
+      totalPM: 0,
+      totalCost: 0,
+    }
+  );
+
+const createFormattedReportWorkbook = ({ sheetName, title, subtitle, columns, rows }) => {
   const workbook = new ExcelJS.Workbook();
   const worksheet = workbook.addWorksheet(sheetName);
+  const headerRowNumber = subtitle ? 3 : 2;
 
-  worksheet.columns = columns;
+  worksheet.columns = columns.map((column) => ({
+    key: column.key,
+    width: column.width || 18,
+  }));
 
-  worksheet.getRow(1).font = {
+  worksheet.mergeCells(1, 1, 1, columns.length);
+  const titleCell = worksheet.getCell(1, 1);
+  titleCell.value = title;
+  titleCell.font = {
     bold: true,
+    size: 12,
+  };
+  titleCell.alignment = {
+    horizontal: "center",
+  };
+  titleCell.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "E2F0D9" },
   };
 
-  worksheet.addRows(rows);
+  if (subtitle) {
+    worksheet.mergeCells(2, 1, 2, columns.length);
+    const subtitleCell = worksheet.getCell(2, 1);
+    subtitleCell.value = subtitle;
+    subtitleCell.font = {
+      bold: true,
+    };
+    subtitleCell.alignment = {
+      horizontal: "center",
+    };
+    subtitleCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "E2F0D9" },
+    };
+  }
 
-  worksheet.columns.forEach((column) => {
-    column.width = 20;
+  const headerRow = worksheet.getRow(headerRowNumber);
+  columns.forEach((column, index) => {
+    const cell = headerRow.getCell(index + 1);
+    cell.value = column.header;
+    cell.font = {
+      bold: true,
+    };
+    cell.alignment = {
+      horizontal: "center",
+    };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "DDEBF7" },
+    };
+    cell.border = tableBorder;
   });
+
+  rows.forEach((row) => {
+    const excelRow = worksheet.addRow(
+      columns.map((column) => (column.value ? column.value(row) : row[column.key]))
+    );
+
+    excelRow.eachCell((cell, columnNumber) => {
+      const column = columns[columnNumber - 1];
+
+      cell.border = tableBorder;
+
+      if (column?.alignment) {
+        cell.alignment = column.alignment;
+      }
+
+      if (column?.numFmt) {
+        cell.numFmt = column.numFmt;
+      }
+    });
+  });
+
+  worksheet.views = [
+    {
+      state: "frozen",
+      ySplit: headerRowNumber,
+    },
+  ];
 
   return workbook;
 };
 
 exports.createPMPlanExcel = async (query) => {
   const rows = await exports.getPMPlanReport(query);
+  const subtitle = await getPMPlanReportSubtitle(query);
 
-  const workbook = createWorkbook(
-    "PM Plan Report",
-    [
-      { header: "No", key: "no" },
-      { header: "PM Plan Date", key: "pmPlanDate" },
-      { header: "Actual PM Date", key: "actualPMDate" },
-      { header: "Group", key: "deviceGroup" },
-      { header: "Type", key: "deviceType" },
-      { header: "Serial Number", key: "serialNumber" },
-      { header: "Brand", key: "brand" },
-      { header: "Model", key: "model" },
-      { header: "Device Name", key: "deviceName" },
-      { header: "Zone", key: "zoneCode" },
-      { header: "Status", key: "displayStatus" },
+  const workbook = createFormattedReportWorkbook({
+    sheetName: "Plan & Result PM",
+    title: getPMPlanReportTitle(query),
+    subtitle,
+    columns: [
+      { header: "No", key: "no", width: 8 },
+      {
+        header: "PM Plan Date",
+        key: "pmPlanDate",
+        width: 16,
+        value: (row) => formatExcelDate(row.pmPlanDate),
+      },
+      {
+        header: "วันที่ PM อุปกรณ์",
+        key: "actualPMDate",
+        width: 18,
+        value: (row) => formatExcelDate(row.actualPMDate),
+      },
+      { header: "กลุ่มอุปกรณ์", key: "deviceGroup", width: 18 },
+      { header: "ชนิด", key: "deviceType", width: 18 },
+      { header: "SN อุปกรณ์", key: "serialNumber", width: 24 },
+      { header: "BRAND", key: "brand", width: 16 },
+      { header: "MODEL", key: "model", width: 18 },
+      { header: "ชื่อของอุปกรณ์", key: "deviceName", width: 24 },
+      { header: "Zone", key: "zoneCode", width: 12 },
+      { header: "Status", key: "displayStatus", width: 16 },
     ],
-    rows
-  );
+    rows,
+  });
 
   return workbook;
 };
 
 exports.createPMHistoryExcel = async (query) => {
   const rows = await exports.getPMHistoryReport(query);
+  const deviceName =
+    query.deviceSearch && !query.deviceId
+      ? `คำค้นหา ${query.deviceSearch}`
+      : await getDeviceReportName(query.deviceId);
 
-  const workbook = createWorkbook(
-    "PM History Report",
-    [
-      { header: "No", key: "no" },
-      { header: "PM Date", key: "pmDate" },
-      { header: "Performed By", key: "performedBy" },
-      { header: "Group", key: "deviceGroup" },
-      { header: "Type", key: "deviceType" },
-      { header: "Serial Number", key: "serialNumber" },
-      { header: "Brand", key: "brand" },
-      { header: "Model", key: "model" },
-      { header: "Device Name", key: "deviceName" },
-      { header: "Zone", key: "zoneCode" },
-      { header: "Cost", key: "cost" },
-      { header: "Remark", key: "remark" },
+  const workbook = createFormattedReportWorkbook({
+    sheetName: "PM Log",
+    title: `รายงานประวัติการ PM ของอุปกรณ์ ${deviceName}`,
+    subtitle: `ตั้งแต่ : ${getReportRangeText(query)}`,
+    columns: [
+      { header: "No", key: "no", width: 8 },
+      {
+        header: "วันที่ PM อุปกรณ์",
+        key: "pmDate",
+        width: 20,
+        value: (row) => formatDayMonthExcelDate(row.pmDate),
+      },
+      { header: "ผู้ดำเนินการ", key: "performedBy", width: 24 },
     ],
-    rows
-  );
+    rows,
+  });
 
   return workbook;
 };
 
 exports.createPMCostExcel = async (query) => {
   const rows = await exports.getPMCostReport(query);
+  const groupName = await getGroupReportName(query.groupId);
+  const totals = getPMCostTotals(rows);
+  const rowsWithTotal = [
+    ...rows,
+    {
+      no: "",
+      equipmentGroup: "Grand Total",
+      totalPM: totals.totalPM,
+      totalCost: totals.totalCost,
+    },
+  ];
 
-  const workbook = createWorkbook(
-    "PM Cost Report",
-    [
-      { header: "No", key: "no" },
-      { header: "Group", key: "equipmentGroup" },
-      { header: "Total PM", key: "totalPM" },
-      { header: "Total Cost", key: "totalCost" },
+  const workbook = createFormattedReportWorkbook({
+    sheetName: "PM Cost Report",
+    title: getPMCostReportTitle(query),
+    subtitle: `ช่วงวันที่ : ${getReportRangeText(query)} | กลุ่มอุปกรณ์ : ${groupName}`,
+    columns: [
+      {
+        header: "No",
+        key: "no",
+        width: 8,
+        alignment: { horizontal: "center" },
+      },
+      { header: "กลุ่มอุปกรณ์", key: "equipmentGroup", width: 24 },
+      {
+        header: "จำนวน PM",
+        key: "totalPM",
+        width: 16,
+        alignment: { horizontal: "center" },
+        numFmt: "#,##0",
+      },
+      {
+        header: "ค่าใช้จ่ายรวม (บาท)",
+        key: "totalCost",
+        width: 22,
+        alignment: { horizontal: "right" },
+        numFmt: "#,##0",
+      },
     ],
-    rows
-  );
+    rows: rowsWithTotal,
+  });
+
+  const worksheet = workbook.getWorksheet("PM Cost Report");
+  const totalRow = worksheet.lastRow;
+
+  totalRow.font = {
+    bold: true,
+  };
+  totalRow.fill = {
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "E2F0D9" },
+  };
+  totalRow.eachCell((cell) => {
+    cell.border = tableBorder;
+  });
 
   return workbook;
 };

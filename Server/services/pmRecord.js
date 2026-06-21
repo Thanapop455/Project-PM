@@ -1,4 +1,6 @@
-const prisma = require("../config/prismaClient");
+const prisma = require("../config/prisma");
+const { getUTCDateRange, parseDateInput } = require("../utils/date");
+const { findManyPaginated } = require("../utils/pagination");
 
 const findPolicyForDevice = async (device) => {
   const typePolicy = await prisma.pMPolicy.findFirst({
@@ -25,7 +27,7 @@ const findPolicyForDevice = async (device) => {
 };
 
 exports.list = async (query) => {
-  const { deviceId, year, month } = query;
+  const { deviceId, year, month, search } = query;
 
   const where = {};
 
@@ -33,17 +35,37 @@ exports.list = async (query) => {
     where.deviceId = Number(deviceId);
   }
 
-  if (year && month) {
-    const startDate = new Date(Number(year), Number(month) - 1, 1);
-    const endDate = new Date(Number(year), Number(month), 1);
+  if (year) {
+    const dateRange = getUTCDateRange({ year, month });
 
-    where.pmDate = {
-      gte: startDate,
-      lt: endDate,
-    };
+    if (dateRange) {
+      where.pmDate = dateRange;
+    }
   }
 
-  const records = await prisma.pMRecord.findMany({
+  if (search) {
+    const searchText = String(search).trim();
+    const searchFilters = [
+      { remark: { contains: searchText } },
+      { user: { username: { contains: searchText } } },
+      { user: { fullName: { contains: searchText } } },
+      { device: { deviceName: { contains: searchText } } },
+      { device: { serialNumber: { contains: searchText } } },
+      { device: { type: { name: { contains: searchText } } } },
+      { device: { type: { group: { name: { contains: searchText } } } } },
+      { device: { model: { name: { contains: searchText } } } },
+      { device: { model: { brand: { name: { contains: searchText } } } } },
+      { device: { zone: { code: { contains: searchText } } } },
+    ];
+
+    if (searchText !== "" && Number.isFinite(Number(searchText))) {
+      searchFilters.push({ cost: Number(searchText) });
+    }
+
+    where.OR = searchFilters;
+  }
+
+  const records = await findManyPaginated(prisma.pMRecord, {
     where,
     orderBy: {
       pmDate: "desc",
@@ -74,62 +96,20 @@ exports.list = async (query) => {
         },
       },
     },
-  });
+  }, query);
 
   return records;
 };
 
-exports.getByDevice = async (deviceId) => {
-  const device = await prisma.device.findUnique({
-    where: {
-      id: Number(deviceId),
-    },
-  });
+exports.create = async (body, actor) => {
+  const { pmPlanId, pmDate, cost, remark } = body;
+  const userId = Number(actor?.id);
 
-  if (!device) {
-    const error = new Error("Device not found");
-    error.status = 404;
+  if (!Number.isInteger(userId) || userId <= 0) {
+    const error = new Error("Authenticated user is required");
+    error.status = 401;
     throw error;
   }
-
-  return await prisma.pMRecord.findMany({
-    where: {
-      deviceId: Number(deviceId),
-    },
-    orderBy: {
-      pmDate: "desc",
-    },
-    include: {
-      user: {
-        select: {
-          id: true,
-          username: true,
-          fullName: true,
-          role: true,
-        },
-      },
-      pmPlan: true,
-      device: {
-        include: {
-          type: {
-            include: {
-              group: true,
-            },
-          },
-          model: {
-            include: {
-              brand: true,
-            },
-          },
-          zone: true,
-        },
-      },
-    },
-  });
-};
-
-exports.create = async (body, userId) => {
-  const { pmPlanId, pmDate, cost, remark } = body;
 
   if (!pmPlanId) {
     const error = new Error("PM Plan is required");
@@ -139,6 +119,14 @@ exports.create = async (body, userId) => {
 
   if (!pmDate) {
     const error = new Error("PM date is required");
+    error.status = 400;
+    throw error;
+  }
+
+  const parsedPMDate = parseDateInput(pmDate);
+
+  if (!parsedPMDate) {
+    const error = new Error("PM date is invalid");
     error.status = 400;
     throw error;
   }
@@ -211,7 +199,7 @@ exports.create = async (body, userId) => {
         pmPlanId: Number(pmPlanId),
         deviceId: plan.deviceId,
         performedBy: userId,
-        pmDate: new Date(pmDate),
+        pmDate: parsedPMDate,
         cost: String(finalCost),
         remark: remark || null,
       },
@@ -243,7 +231,7 @@ exports.create = async (body, userId) => {
       },
     });
 
-    const updatedPlan = await tx.pMPlan.update({
+    await tx.pMPlan.update({
       where: {
         id: Number(pmPlanId),
       },

@@ -9,6 +9,5 @@ router.use(authCheck, staffOnly);
 
 router.get("/", pmRecordController.list);
 router.post("/", pmRecordController.create);
-router.get("/device/:deviceId", pmRecordController.getByDevice);
 
 module.exports = router;

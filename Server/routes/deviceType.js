@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-const deviceTypeController = require("../controllers/deviceType.controller");
+const deviceTypeController = require("../controllers/deviceType");
 const authCheck = require("../middlewares/authCheck");
 const adminOnly = require("../middlewares/adminOnly");
 
