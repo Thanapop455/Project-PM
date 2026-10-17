@@ -124,6 +124,7 @@ model Device {
 
   serialNumber String       @unique @db.VarChar(100)
   deviceName   String       @db.VarChar(150)
+  remark       String?      @db.Text
   pmStartDate  DateTime?    @db.Date
   status       DeviceStatus @default(ACTIVE)
 

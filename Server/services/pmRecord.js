@@ -1,30 +1,7 @@
 const prisma = require("../config/prisma");
+const pmPlanService = require("./pmPlan");
 const { getUTCDateRange, parseDateInput } = require("../utils/date");
 const { findManyPaginated } = require("../utils/pagination");
-
-const findPolicyForDevice = async (device) => {
-  const typePolicy = await prisma.pMPolicy.findFirst({
-    where: {
-      target: "TYPE",
-      deviceTypeId: device.deviceTypeId,
-      isActive: true,
-    },
-  });
-
-  if (typePolicy) {
-    return typePolicy;
-  }
-
-  const groupPolicy = await prisma.pMPolicy.findFirst({
-    where: {
-      target: "GROUP",
-      deviceGroupId: device.type.groupId,
-      isActive: true,
-    },
-  });
-
-  return groupPolicy;
-};
 
 exports.list = async (query) => {
   const { deviceId, year, month, search } = query;
@@ -182,7 +159,7 @@ exports.create = async (body, actor) => {
   let finalCost = cost;
 
   if (finalCost === undefined || finalCost === null || finalCost === "") {
-    const policy = await findPolicyForDevice(plan.device);
+    const policy = await pmPlanService.findPolicyForDevice(plan.device);
 
     if (!policy) {
       const error = new Error("PM Policy not found for this device");
@@ -231,19 +208,18 @@ exports.create = async (body, actor) => {
       },
     });
 
-    await tx.pMPlan.update({
-      where: {
-        id: Number(pmPlanId),
-      },
-      data: {
-        status: "DONE",
-      },
+    const planSync = await pmPlanService.completePlanAndScheduleNextFromRecord({
+      pmPlanId: Number(pmPlanId),
+      record,
+      client: tx,
     });
 
     return {
       message: "Complete PM success",
       record,
-      plan: updatedPlan,
+      plan: planSync.completedPlan,
+      nextPlan: planSync.nextPlan,
+      pmPlanSync: planSync,
     };
   });
 

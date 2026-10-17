@@ -58,6 +58,7 @@ function Devices() {
       },
       { name: "serialNumber", label: "Serial Number", required: true },
       { name: "deviceName", label: "Device Name", required: true },
+      { name: "remark", label: "Remark", type: "textarea", rows: 3 },
       {
         name: "pmStartDate",
         label: "PM Start Date",
@@ -103,6 +104,7 @@ function Devices() {
           zoneId: Number(form.zoneId),
           serialNumber: form.serialNumber,
           deviceName: form.deviceName,
+          remark: form.remark || null,
           pmStartDate: form.pmStartDate,
           regeneratePMPlans,
           status: form.status,
@@ -116,6 +118,7 @@ function Devices() {
         { key: "model", label: "Model", path: "model.name" },
         { key: "deviceName", label: "Device Name" },
         { key: "zone", label: "Zone", path: "zone.code" },
+        { key: "remark", label: "Remark" },
         { key: "status", label: "Status" },
       ]}
       fields={fields}
@@ -126,6 +129,7 @@ function Devices() {
         zoneId: String(row.zoneId),
         serialNumber: row.serialNumber,
         deviceName: row.deviceName,
+        remark: row.remark || "",
         pmStartDate: toDateInput(row.pmStartDate),
         status: row.status,
       })}
@@ -137,9 +141,10 @@ function Devices() {
         "model.name",
         "deviceName",
         "zone.code",
+        "remark",
         "status",
       ]}
-      searchPlaceholder="Search group / type / SN / brand / model / device / zone"
+      searchPlaceholder="Search group / type / SN / brand / model / device / zone / remark"
       title="Devices"
     />
   );

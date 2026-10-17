@@ -1,56 +1,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { deviceGroupApi } from "../../api/deviceGroupApi";
-import { deviceTypeApi } from "../../api/deviceTypeApi";
 import { pmPolicyApi } from "../../api/pmPolicyApi";
 import CrudPage from "../../components/common/CrudPage";
 
 function PMPolicies() {
   const [groups, setGroups] = useState([]);
-  const [types, setTypes] = useState([]);
 
   useEffect(() => {
-    Promise.all([
-      deviceGroupApi.getAll().catch(() => []),
-      deviceTypeApi.getAll().catch(() => []),
-    ]).then(([groupList, typeList]) => {
-      setGroups(groupList);
-      setTypes(typeList);
-    });
+    deviceGroupApi.getAll().then(setGroups).catch(() => setGroups([]));
   }, []);
 
   const fields = useMemo(
     () => [
       {
-        name: "target",
-        label: "Target",
-        type: "select",
-        defaultValue: "GROUP",
-        required: true,
-        options: [
-          { label: "Device Group", value: "GROUP" },
-          { label: "Device Type", value: "TYPE" },
-        ],
-      },
-      {
         name: "deviceGroupId",
         label: "Device Group",
         type: "select",
         required: true,
-        hidden: (form) => form.target !== "GROUP",
         options: groups.map((group) => ({
           label: group.name,
           value: String(group.id),
-        })),
-      },
-      {
-        name: "deviceTypeId",
-        label: "Device Type",
-        type: "select",
-        required: true,
-        hidden: (form) => form.target !== "TYPE",
-        options: types.map((type) => ({
-          label: `${type.group?.name || "-"} / ${type.name}`,
-          value: String(type.id),
         })),
       },
       {
@@ -76,31 +45,24 @@ function PMPolicies() {
         defaultValue: true,
       },
     ],
-    [groups, types]
+    [groups]
   );
 
   return (
     <CrudPage
       api={pmPolicyApi}
       buildPayload={(form) => ({
-        target: form.target,
-        deviceGroupId:
-          form.target === "GROUP" ? Number(form.deviceGroupId) : undefined,
-        deviceTypeId:
-          form.target === "TYPE" ? Number(form.deviceTypeId) : undefined,
+        target: "GROUP",
+        deviceGroupId: Number(form.deviceGroupId),
         intervalMonths: Number(form.intervalMonths),
         defaultCost: Number(form.defaultCost),
         isActive: form.isActive,
       })}
       columns={[
-        { key: "target", label: "Target" },
         {
-          key: "applyTo",
-          label: "Apply To",
-          render: (row) =>
-            row.target === "GROUP"
-              ? row.deviceGroup?.name
-              : `${row.deviceType?.group?.name || "-"} / ${row.deviceType?.name}`,
+          key: "deviceGroup",
+          label: "Device Group",
+          render: (row) => row.deviceGroup?.name || "-",
         },
         { key: "intervalMonths", label: "Interval" },
         { key: "defaultCost", label: "Default Cost" },
@@ -111,24 +73,37 @@ function PMPolicies() {
         },
       ]}
       fields={fields}
+      getSuccessMessage={(result, { editing }) => {
+        const sync = result?.planSync;
+
+        if (!sync) {
+          return editing ? "PM Policy saved." : "PM Policy added.";
+        }
+
+        if (editing && !result.scheduleChanged) {
+          return "PM Policy saved. The cost was updated; PM plan dates were unchanged.";
+        }
+
+        const years = (sync.affectedYears || []).join(", ") || "-";
+        return `PM Policy saved. Pending plans updated for ${years}: deleted ${
+          sync.deletedCount || 0
+        }, created ${sync.createdCount || 0}, restored ${
+          sync.restoredCount || 0
+        }, skipped ${sync.skippedCount || 0}.`;
+      }}
       mapRowToForm={(row) => ({
-        target: row.target,
         deviceGroupId: row.deviceGroupId ? String(row.deviceGroupId) : "",
-        deviceTypeId: row.deviceTypeId ? String(row.deviceTypeId) : "",
         intervalMonths: String(row.intervalMonths),
         defaultCost: String(row.defaultCost),
         isActive: row.isActive,
       })}
       searchKeys={[
-        "target",
         "deviceGroup.name",
-        "deviceType.group.name",
-        "deviceType.name",
         "intervalMonths",
         "defaultCost",
         "isActive",
       ]}
-      searchPlaceholder="Search target / group / type / interval / cost / active"
+      searchPlaceholder="Search group / interval / cost / active"
       title="PM Policies"
     />
   );

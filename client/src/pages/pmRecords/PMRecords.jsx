@@ -265,45 +265,43 @@ function PMRecords() {
         </form>
 
         <div className="panel">
+          <div className="table-toolbar">
+            <label className="field table-search-field">
+              <span>Search</span>
+              <input
+                placeholder="Search device / SN / staff / remark / cost"
+                type="search"
+                value={recordSearch}
+                onChange={(event) => setRecordSearch(event.target.value)}
+              />
+            </label>
+          </div>
           {loading ? (
             <Loading />
           ) : (
-            <>
-              <div className="table-toolbar">
-                <label className="field table-search-field">
-                  <span>Search</span>
-                  <input
-                    placeholder="Search device / SN / staff / remark / cost"
-                    type="search"
-                    value={recordSearch}
-                    onChange={(event) => setRecordSearch(event.target.value)}
-                  />
-                </label>
-              </div>
-              <DataTable
-                columns={[
-                  {
-                    key: "planDate",
-                    label: "Plan Date",
-                    render: (row) => formatDate(row.pmPlan?.planDate),
-                  },
-                  { key: "pmDate", label: "PM Date", render: (row) => formatDate(row.pmDate) },
-                  { key: "device", label: "Device", render: (row) => row.device?.deviceName },
-                  { key: "serialNumber", label: "SN", render: (row) => row.device?.serialNumber },
-                  { key: "performedBy", label: "Performed By", render: (row) => row.user?.fullName },
-                  { key: "cost", label: "Cost" },
-                  { key: "remark", label: "Remark" },
-                ]}
-                data={records}
-                pagination={pagination}
-                onPageChange={(page) =>
-                  setPagination((current) => ({ ...current, page }))
-                }
-                onPageSizeChange={(pageSize) =>
-                  setPagination((current) => ({ ...current, page: 1, pageSize }))
-                }
-              />
-            </>
+            <DataTable
+              columns={[
+                {
+                  key: "planDate",
+                  label: "Plan Date",
+                  render: (row) => formatDate(row.pmPlan?.planDate),
+                },
+                { key: "pmDate", label: "PM Date", render: (row) => formatDate(row.pmDate) },
+                { key: "device", label: "Device", render: (row) => row.device?.deviceName },
+                { key: "serialNumber", label: "SN", render: (row) => row.device?.serialNumber },
+                { key: "performedBy", label: "Performed By", render: (row) => row.user?.fullName },
+                { key: "cost", label: "Cost" },
+                { key: "remark", label: "Remark" },
+              ]}
+              data={records}
+              pagination={pagination}
+              onPageChange={(page) =>
+                setPagination((current) => ({ ...current, page }))
+              }
+              onPageSizeChange={(pageSize) =>
+                setPagination((current) => ({ ...current, page: 1, pageSize }))
+              }
+            />
           )}
         </div>
       </div>

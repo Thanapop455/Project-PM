@@ -35,7 +35,7 @@ exports.startPMAlertScheduler = () => {
       const existingLog = await alertLogService.getAutoAlertLog(alertDate);
 
       if (existingLog) {
-           = todayKey;
+        lastSentDate = todayKey;
         console.log(`[PM Alert Scheduler] already handled for ${todayKey}`);
         return;
       }

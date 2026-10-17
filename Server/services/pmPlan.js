@@ -1,6 +1,7 @@
 const prisma = require("../config/prisma");
 const {
   DAY_MS,
+  getLastDayOfMonth,
   getTodayDate,
   getUTCDateRange,
   normalizeDateOnly,
@@ -81,13 +82,10 @@ const addMonthsClamped = (baseDate, monthsToAdd) => {
     )
   );
 
-  const lastDayOfTargetMonth = new Date(
-    Date.UTC(
-      firstDayOfTargetMonth.getUTCFullYear(),
-      firstDayOfTargetMonth.getUTCMonth() + 1,
-      0
-    )
-  ).getUTCDate();
+  const lastDayOfTargetMonth = getLastDayOfMonth(
+    firstDayOfTargetMonth.getUTCFullYear(),
+    firstDayOfTargetMonth.getUTCMonth() + 1
+  );
 
   return new Date(
     Date.UTC(
@@ -143,34 +141,79 @@ const getPlanDatesForYear = ({
   return planDates;
 };
 
-const findPolicyForDevice = async (device, client = prisma) => {
-  const typePolicy = await client.pMPolicy.findFirst({
-    where: {
-      target: "TYPE",
-      deviceTypeId: device.deviceTypeId,
-      isActive: true,
+const includeDeviceRelations = {
+  type: {
+    include: {
+      group: true,
     },
-  });
+  },
+  model: {
+    include: {
+      brand: true,
+    },
+  },
+  zone: true,
+};
 
-  if (typePolicy) {
-    return typePolicy;
+const includePlanDevice = {
+  device: {
+    include: includeDeviceRelations,
+  },
+};
+
+const getPolicyFiltersForDevice = (device) => {
+  const filters = [];
+
+  if (device.deviceTypeId || device.type?.id) {
+    filters.push({
+      target: "TYPE",
+      deviceTypeId: Number(device.deviceTypeId || device.type.id),
+    });
   }
 
-  const groupPolicy = await client.pMPolicy.findFirst({
-    where: {
+  if (device.type?.groupId) {
+    filters.push({
       target: "GROUP",
-      deviceGroupId: device.type.groupId,
+      deviceGroupId: Number(device.type.groupId),
+    });
+  }
+
+  return filters;
+};
+
+const pickBestPolicy = (policies) =>
+  policies.find((policy) => policy.target === "TYPE") ||
+  policies.find((policy) => policy.target === "GROUP") ||
+  null;
+
+const findPolicyForDevice = async (device, client = prisma) => {
+  const filters = getPolicyFiltersForDevice(device);
+
+  if (filters.length === 0) {
+    return null;
+  }
+
+  const policies = await client.pMPolicy.findMany({
+    where: {
       isActive: true,
+      OR: filters,
+    },
+    orderBy: {
+      updatedAt: "desc",
     },
   });
 
-  return groupPolicy;
+  return pickBestPolicy(policies);
 };
 
 const createPolicyResolver = async (client = prisma) => {
   const policies = await client.pMPolicy.findMany({
     where: {
       isActive: true,
+      OR: [
+        { target: "TYPE" },
+        { target: "GROUP" },
+      ],
     },
     orderBy: {
       updatedAt: "desc",
@@ -181,21 +224,21 @@ const createPolicyResolver = async (client = prisma) => {
   const groupPolicies = new Map();
 
   for (const policy of policies) {
-    if (policy.target === "TYPE" && policy.deviceTypeId && !typePolicies.has(policy.deviceTypeId)) {
+    if (
+      policy.target === "TYPE" &&
+      policy.deviceTypeId &&
+      !typePolicies.has(policy.deviceTypeId)
+    ) {
       typePolicies.set(policy.deviceTypeId, policy);
     }
 
-    if (
-      policy.target === "GROUP" &&
-      policy.deviceGroupId &&
-      !groupPolicies.has(policy.deviceGroupId)
-    ) {
+    if (policy.deviceGroupId && !groupPolicies.has(policy.deviceGroupId)) {
       groupPolicies.set(policy.deviceGroupId, policy);
     }
   }
 
   return (device) =>
-    typePolicies.get(device.deviceTypeId) ||
+    typePolicies.get(device.deviceTypeId || device.type?.id) ||
     groupPolicies.get(device.type?.groupId) ||
     null;
 };
@@ -288,25 +331,198 @@ const createPlansForDevice = async ({
 };
 
 exports.createPlansForDevice = createPlansForDevice;
+exports.findPolicyForDevice = findPolicyForDevice;
 exports.getCountdownLabel = getCountdownLabel;
 exports.getDaysUntilPM = getDaysUntilPM;
 
-const includePlanDevice = {
-  device: {
-    include: {
-      type: {
-        include: {
-          group: true,
+exports.completePlanAndScheduleNextFromRecord = async ({
+  pmPlanId,
+  record,
+  client = prisma,
+}) => {
+  const pmDate = normalizeDateOnly(record?.pmDate);
+
+  if (!record?.deviceId || !pmDate) {
+    return {
+      completedPlan: null,
+      policy: null,
+      nextPlanDate: null,
+      nextPlan: null,
+      createdNextPlan: false,
+      restoredNextPlan: false,
+      deletedFuturePendingCount: 0,
+      skippedReason: "INVALID_PM_RECORD",
+    };
+  }
+
+  const completedPlan = pmPlanId
+    ? await client.pMPlan.update({
+        where: {
+          id: Number(pmPlanId),
         },
-      },
-      model: {
-        include: {
-          brand: true,
+        data: {
+          status: "DONE",
         },
-      },
-      zone: true,
+      })
+    : null;
+
+  const device = await client.device.findUnique({
+    where: {
+      id: Number(record.deviceId),
     },
-  },
+    include: includeDeviceRelations,
+  });
+
+  if (!device) {
+    return {
+      completedPlan,
+      policy: null,
+      nextPlanDate: null,
+      nextPlan: null,
+      createdNextPlan: false,
+      restoredNextPlan: false,
+      deletedFuturePendingCount: 0,
+      skippedReason: "DEVICE_NOT_FOUND",
+    };
+  }
+
+  const policy =
+    device.status === "ACTIVE"
+      ? await findPolicyForDevice(device, client)
+      : null;
+  const intervalMonths = Number(policy?.intervalMonths);
+  const canCreateNextPlan =
+    device.status === "ACTIVE" &&
+    policy &&
+    Number.isFinite(intervalMonths) &&
+    intervalMonths > 0;
+  const nextPlanDate = canCreateNextPlan
+    ? addMonthsClamped(pmDate, intervalMonths)
+    : null;
+  const futurePlanDateFilter = nextPlanDate
+    ? {
+        gt: pmDate,
+        notIn: [nextPlanDate],
+      }
+    : {
+        gt: pmDate,
+      };
+
+  const deleteFuturePendingResult = await client.pMPlan.deleteMany({
+    where: {
+      deviceId: device.id,
+      status: "PENDING",
+      planDate: futurePlanDateFilter,
+    },
+  });
+
+  if (!canCreateNextPlan) {
+    return {
+      completedPlan,
+      policy,
+      nextPlanDate: null,
+      nextPlan: null,
+      createdNextPlan: false,
+      restoredNextPlan: false,
+      deletedFuturePendingCount: deleteFuturePendingResult.count,
+      skippedReason:
+        device.status !== "ACTIVE" ? "DEVICE_INACTIVE" : "PM_POLICY_NOT_FOUND",
+    };
+  }
+
+  const existingNextPlan = await client.pMPlan.findUnique({
+    where: {
+      deviceId_planDate: {
+        deviceId: device.id,
+        planDate: nextPlanDate,
+      },
+    },
+    include: includePlanDevice,
+  });
+
+  if (existingNextPlan) {
+    if (existingNextPlan.status === "CANCELLED") {
+      const restoredNextPlan = await client.pMPlan.update({
+        where: {
+          id: existingNextPlan.id,
+        },
+        data: {
+          status: "PENDING",
+        },
+        include: includePlanDevice,
+      });
+
+      return {
+        completedPlan,
+        policy,
+        nextPlanDate,
+        nextPlan: restoredNextPlan,
+        createdNextPlan: false,
+        restoredNextPlan: true,
+        deletedFuturePendingCount: deleteFuturePendingResult.count,
+        skippedReason: null,
+      };
+    }
+
+    return {
+      completedPlan,
+      policy,
+      nextPlanDate,
+      nextPlan: existingNextPlan,
+      createdNextPlan: false,
+      restoredNextPlan: false,
+      deletedFuturePendingCount: deleteFuturePendingResult.count,
+      skippedReason:
+        existingNextPlan.status === "DONE" ? "NEXT_PLAN_ALREADY_DONE" : null,
+    };
+  }
+
+  try {
+    const nextPlan = await client.pMPlan.create({
+      data: {
+        deviceId: device.id,
+        planDate: nextPlanDate,
+        status: "PENDING",
+      },
+      include: includePlanDevice,
+    });
+
+    return {
+      completedPlan,
+      policy,
+      nextPlanDate,
+      nextPlan,
+      createdNextPlan: true,
+      restoredNextPlan: false,
+      deletedFuturePendingCount: deleteFuturePendingResult.count,
+      skippedReason: null,
+    };
+  } catch (error) {
+    if (error.code !== "P2002") {
+      throw error;
+    }
+
+    const nextPlan = await client.pMPlan.findUnique({
+      where: {
+        deviceId_planDate: {
+          deviceId: device.id,
+          planDate: nextPlanDate,
+        },
+      },
+      include: includePlanDevice,
+    });
+
+    return {
+      completedPlan,
+      policy,
+      nextPlanDate,
+      nextPlan,
+      createdNextPlan: false,
+      restoredNextPlan: false,
+      deletedFuturePendingCount: deleteFuturePendingResult.count,
+      skippedReason: "NEXT_PLAN_ALREADY_EXISTS",
+    };
+  }
 };
 
 exports.replacePendingPlansForDevice = async ({

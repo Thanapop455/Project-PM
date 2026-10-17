@@ -117,6 +117,7 @@ exports.list = async (query) => {
     const searchFilters = [
       { serialNumber: { contains: searchText } },
       { deviceName: { contains: searchText } },
+      { remark: { contains: searchText } },
       { type: { name: { contains: searchText } } },
       { type: { group: { name: { contains: searchText } } } },
       { model: { name: { contains: searchText } } },
@@ -188,6 +189,7 @@ exports.create = async (body) => {
     zoneId,
     serialNumber,
     deviceName,
+    remark,
     pmStartDate,
     status,
   } = body;
@@ -265,6 +267,7 @@ exports.create = async (body) => {
       zoneId: Number(zoneId),
       serialNumber,
       deviceName,
+      remark: String(remark || "").trim() || null,
       pmStartDate: parseDateOnly(pmStartDate || new Date(), "PM start date"),
       status: status || "ACTIVE",
     },
@@ -324,6 +327,7 @@ exports.update = async (id, body) => {
     zoneId,
     serialNumber,
     deviceName,
+    remark,
     pmStartDate,
     regeneratePMPlans,
     status,
@@ -398,6 +402,10 @@ exports.update = async (id, body) => {
 
   if (deviceName !== undefined) {
     data.deviceName = deviceName;
+  }
+
+  if (remark !== undefined) {
+    data.remark = String(remark || "").trim() || null;
   }
 
   if (pmStartDate !== undefined) {
